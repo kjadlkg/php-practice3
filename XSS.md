@@ -72,7 +72,7 @@ https://example.com/search?q=<script>alert('Hacked!');</script>```
 
 ### 3. DOM 기반 XSS (DOM-based XSS)
 
-: 서버 응답이 아니라, 클라이언트 측 자바스크립트에서 DOM 조작을 통해 실행되는 방식식
+: 서버 응답이 아니라, 클라이언트 측 자바스크립트에서 DOM 조작을 통해 실행되는 방식
 
 Reflected XSS와 Stored XSS 공격이 서버의 취약점을 이용해서 악성 스크립트가 포함된 응답 페이지를 전달하는 것인 반면,
 DOM XSS는 서버와 관련없이 클라이언트 측에서 파라미터를 처리할 때 발생한다.
