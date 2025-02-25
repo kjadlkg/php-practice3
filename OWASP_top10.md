@@ -84,7 +84,7 @@
 
    일반 사용자가 `user` 역할을 가지고 있지만, 요청을 수정하여 `admin` 역할을 얻을 수 있는 경우가 존재한다.
 
-      <br>
+   <br>
 
    **취약한 코드 예시**
 
@@ -127,6 +127,8 @@
    - 세션 값은 서버에서만 관리하며, 클라이언트에서 임의로 수정할 수 없도록 작성한다.
    - 중요한 데이터는 클라이언트에서 직접 조작할 수 없도록 HTTPOnly 속성을 추가한다.
 
+<br>
+
 **방어 방법 요약**
 
 - 클라이언트 검증만 믿지 않기, 서버 측에서 권한 확인
@@ -138,26 +140,116 @@
 <br>
 <br>
 
+---
+
 ### 2. Cryptographic Failures, 암호화 실패
 
 **공격 방식**:
 
-- 민감한 데이터(비밀번호, 카드 정보 등)가 암호화되지 않거나 취약한 암호화 알고리즘 사용
-- HTTPS 미사용으로 데이터가 평문으로 전송됨
-- 하드코딩된 키 또는 재사용된 암호화 키 사용
+1. 민감한 데이터가 암호화되지 않음
+
+   - 비밀번호, 신용카드 정보, 개인 식별 정보(PII, Personally Identifiable Information) 등이 암호화되지 않은 상태로 저장되거나 전송된다.
+   - 데이터베이스에 평문(Plaintext) 비밀번호 저장의 경우,
+
+   ```sql
+   INSERT INTO users (username, password) VALUES ('admin', '123456');
+   ```
+
+   - 공격자가 데이터베이스에 접근하면 모든 계정의 비밀번호를 쉽게 확인할 수 있다.
+
+2. 취약한 암호화 알고리즘 사용
+
+   - 보안이 약한 알고리즘(MD5, SHA-1, DES 등)을 사용하면 공격자가 쉽게 복호화 가능하다.
+   - MD5로 해시된 비밀번호는 레인보우 테이블 공격(Rainbow Table Attack)에 취약하다.
+
+   ```php
+   $hashed_password = md5('mypassword'); // 취약한 해시 알고리즘
+   ```
+
+   - MD5는 빠른 해싱 알고리즘이므로 사전 공격(Dictionary Attack)과 레인보우 테이블 공격에 의해 쉽게 뚫릴 수 있다.
+
+3. HTTPS 미사용 (데이터 평문 전송)
+
+   - 로그인 요청, 결제 정보 등이 HTTP(비보안 프로토콜)로 전송되면 중간자 공격(Man-in-the-Middle, MITM)에 노출될 수 있다.
+   - 로그인 요청이 HTTP로 전송된다.
+
+   ```sql
+   POST http://example.com/login
+   Content-Type: application/x-www-form-urlencoded
+
+   username=admin&password=123456
+   ```
+
+   - 공격자가 네트워크에서 이 요청을 가로채면 계정 정보가 노출된다.
+
+4. 하드코딩된 키 또는 재사용된 암호화 키 사용
+   - 암호화 키를 코드에 직접 포함하면 소스 코드 유출 시 전체 보안이 깨진다.
+   - 소스 코드 내 하드코딩된 API 키 및 암호화 키의 경우,
+   ```php
+   $encryption_key = "my_secret_key"; // 보안 문제 발생 가능
+   ```
+   - 키가 유출되면 모든 암호화된 데이터가 복호화될 위험이 존재한다.
+
+<br>
 
 **공격 시나리오**:
 
-공격자가 네트워크 스니핑을 통해 HTTP로 전송되는 로그인 정보를 가로채어 사용자 계정을 탈취한다.
+1. 네트워크 스니핑을 통한 로그인 정보 탈취
 
-**방어 방법**:
+   사용자가 HTTP를 통해 로그인 요청을 보낸다.
 
-- HTTPS (TLS 1.2 이상) 사용
-- 강력한 암호화 알고리즘(AES, RSA, SHA-256 등) 사용
-- 민감한 데이터 저장 시 hasing 및 salt 적용
+   ```pgsql
+   POST http://example.com/login
+   Content-Type: application/x-www-form-urlencoded
+
+   username=admin&password=123456
+   ```
+
+   공격자는 같은 네트워크에 연결된 상태에서 Packet Sniffing을 통해 평문 데이터를 가로챈다.
+
+   가로챈 데이터를 분석하여 사용자의 로그인 정보를 확인하고 계정 탈취가 가능하다.
+
+   <br>
+
+   **방어 방법**:
+
+   - HTTPS (TLS 1.2 이상)를 사용하여 데이터를 암호화한다.
+   - 모든 요청을 HTTP → HTTPS로 강제 리디렉션한다.
+   - Strict-Transport-Security(HSTS) 헤더를 적용하여 HTTPS 연결을 강제한다.
+
+   ```apache
+   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+   ```
+
+   <br>
+
+   2. 취약한 암호화 알고리즘 사용으로 비밀번호 복호화
+
+      웹 사이트가 사용자의 비밀번호를 MD5 또는 SHA-1 해시 알고리즘으로 저장한다.
+
+      공격자가 데이터베이스에서 `5f4dcc3b5aa765d61d8327deb882cf99` 값을 발견한다.
+
+      해시 값을 레인보우 테이블을 이용해 복호화하여 `password123`임을 확인한다.
+
+      공격자는 탈취한 비밀번호를 이용해 사용자 계정에 접근 가능해진다.
+
+   <br>
+
+   **방어 방법**:
+
+   - bcrypt, Argon2 같은 강력한 해시 알고리즘을 사용히고, 가능하면 최신 표준인 Argon2를 우선적으로 적용한다.
+   - Salt(임의의 난수 값) 추가로 동일한 비밀번호라도 해시값이 다르게 저장되도록 한다.
+
+   ```PHP
+   // bcrypt 적용
+   $password = "mypassword";
+   $hashed_password = password_hash($password, PASSWORD_BCRYPT);
+   ```
 
 <br>
 <br>
+
+---
 
 ### 3. Injection, 인젝션 공격
 
