@@ -447,19 +447,150 @@
 
 ### 4. Insecure Design, 취약한 설계
 
+보안이 충분히 고려되지 않은 시스템 설계로 인해 발생한다.
+
+단순한 구현상의 실수가 아닌, 보안 요소가 설계 단계에서부터 반영되지 않은 경우를 포함한다.
+
+일반적으로 비즈니스 로직의 허점을 악용하는 방식으로 이루어진다.
+
+<br>
+
 **공격 방식**:
 
-- 보안이 고려되지 않은 시스템 설계
-- 비즈니스 로직이 예상치 못한 방식으로 악용 가능
+- 비즈니스 로직 취약점: 설계 단계에서 보안 검토 없이 기능을 추가하여 사용자가 의도치 않게 시스템을 조작할 수 있도록 한다.
+- 권한 관리 오류: 특정 사용자만 사용해야 하는 기능을 검증하지 않아, 일반 사용자가 관리자 권한을 수행할 수 있도록 허용된다.
+- 데이터 검증 부족: 클라이언트에서 전달된 데이터를 제대로 검증하지 않아 악용될 가능성이 있다.
+
+<br>
 
 **공격 시나리오**:
-예를 들어, 사용자에게 1회만 제공되는 쿠폰을 여러 번 사용할 수 있도록 설계할 수 있다.
 
-**방어 방법**:
+1. 쿠폰 중복 사용 공격
 
-- 보안 중심 설계 원칙 적용
-- 위협 모델링 수행
-- 보안 코드 리뷰 및 테스트 강화
+   ```php
+   // 사용자가 쿠폰을 적용하는 API
+   $userId = $_SESSION['user_id'];
+   $couponCode = $_POST['coupon_code'];
+
+   // 쿠폰이 존재하는지 확인
+   $query = "SELECT * FROM coupons WHERE code = '$couponCode' AND is_used = 0";
+   $result = mysqli_query($conn, $query);
+   if (mysqli_num_rows($result) > 0) {
+      // 쿠폰 사용 처리
+      $updateQuery = "UPDATE coupons SET is_used = 1 WHERE code = '$couponCode'";
+      mysqli_query($conn, $updateQuery);
+      echo "쿠폰이 적용되었습니다.";
+   } else {
+      echo "잘못된 쿠폰이거나 이미 사용되었습니다.";
+   }
+   ```
+
+   - 쿠폰 사용을 처리하는 과정에서 트랜잭션이 없으며, 동시 요청이 발생하면 중복 적용이 가능하다.
+   - 쿠폰을 사용자와 연결하는 정보가 부족하여, 다른 사용자의 쿠폰을 사용할 수도 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 쿠폰을 특정 사용자에게 매칭하여 등록하도록 설계한다.
+   - 데이터베이스 트랜잭션을 적용하여 동시 요청을 방지한다.
+   - 쿠폰 사용 로직에서 추가적인 검증을 수행한다.
+
+   ```php
+   // 트랜잭션 시작
+   mysqli_begin_transaction($conn);
+
+   $userId = $_SESSION['user_id'];
+   $couponCode = $_POST['coupon_code'];
+
+   // 쿠폰이 해당 사용자에게 속하는지 확인하고 사용되지 않았는지 검사
+   $query = "SELECT * FROM coupons WHERE code = ? AND user_id = ? AND is_used = 0 FOR UPDATE";
+   $stmt = mysqli_prepare($conn, $query);
+   mysqli_stmt_bind_param($stmt, "si", $couponCode, $userId);
+   mysqli_stmt_execute($stmt);
+   $result = mysqli_stmt_get_result($stmt);
+
+   if (mysqli_num_rows($result) > 0) {
+      // 쿠폰 사용 처리
+      $updateQuery = "UPDATE coupons SET is_used = 1 WHERE code = ?";
+      $stmt = mysqli_prepare($conn, $updateQuery);
+      mysqli_stmt_bind_param($stmt, "s", $couponCode);
+      mysqli_stmt_execute($stmt);
+
+      // 트랜잭션 커밋
+      mysqli_commit($conn);
+      echo "쿠폰이 적용되었습니다.";
+   } else {
+      // 트랜잭션 롤백
+      mysqli_rollback($conn);
+      echo "잘못된 쿠폰이거나 이미 사용되었습니다.";
+   }
+   ```
+
+<br>
+
+2. 관리자 권한 상승 공격
+
+   ```php
+   // 사용자의 프로필 정보를 가져오는 API
+   $userId = $_GET['user_id'];
+   $query = "SELECT * FROM users WHERE id = $userId";
+   $result = mysqli_query($conn, $query);
+   $userData = mysqli_fetch_assoc($result);
+   ```
+
+   - `user_id`를 직접 입력받아 조회하는 방식으로, 공격자가 URL을 조작하여 다른 사용자의 정보도 조회 가능해진다.
+   - 권한 검증 없이 요청을 처리한다.
+
+      <br>
+
+   **방어 방법**:
+
+   - 현재 로그인한 사용자의 정보만 조회하도록 제한한다.
+   - 인증된 사용자 ID를 세션에서 가져오도록 수정한다.
+
+   ```php
+   // 현재 로그인한 사용자 정보만 가져오도록 제한
+   $userId = $_SESSION['user_id'];
+   $query = "SELECT * FROM users WHERE id = ?";
+   $stmt = mysqli_prepare($conn, $query);
+   mysqli_stmt_bind_param($stmt, "i", $userId);
+   mysqli_stmt_execute($stmt);
+   $result = mysqli_stmt_get_result($stmt);
+   $userData = mysqli_fetch_assoc($result);
+   ```
+
+   <br>
+
+3. 데이터 검증 부족으로 인한 계정 탈취
+
+   ```php
+   // 비밀번호 변경 API
+   $userId = $_POST['user_id'];
+   $newPassword = $_POST['new_password'];
+   $query = "UPDATE users SET password = '$newPassword' WHERE id = $userId";
+   mysqli_query($conn, $query);
+   ```
+
+   - `user_id`를 클라이언트에서 전달받아 조작이 가능하다.
+   - 비밀번호를 해싱하지 않고 저장한다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 현재 로그인한 사용자의 ID를 세션에서 가져오도록 수정한다.
+   - 비밀번호를 해싱하여 저장한다.
+
+   ```php
+   // 비밀번호 변경 API
+   $userId = $_SESSION['user_id'];
+   $newPassword = password_hash($_POST['new_password'], PASSWORD_BCRYPT);
+   $query = "UPDATE users SET password = ? WHERE id = ?";
+   $stmt = mysqli_prepare($conn, $query);
+   mysqli_stmt_bind_param($stmt, "si", $newPassword, $userId);
+   mysqli_stmt_execute($stmt);
+   ```
 
 <br>
 <br>
