@@ -603,17 +603,95 @@
 - 디버그 모드가 활성화된 상태로 운영
 - 불필요한 포트 및 서비스 노출
 
+<br>
+
 **공격 시나리오**:
-관리 페이지 `/admin`이 기본 계정 `admin:admin`으로 로그인이 가능하다.
 
-**방어 방법**:
+1. 기본 관리자 계정 및 비밀번호 미변경
 
-- 보안 설정 검토 및 최소 권한 원칙 적용
-- 기본 계정 삭제 및 강력한 비밀번호 설정
-- 보안 패치 및 업데이트 적용
+   공격자는 웹 에플리케이션의 관리 페이지(`/admin`)에 접근하여 기본 제공 계정 (`admin:admin`)을 사용해 로그인한다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 기본 계정을 삭제하고, 새로운 관리자 계정을 생성한다.
+   - 강력한 비밀번호 정책을 적용하여 짧거나 쉬운 비밀번호 사용을 방지한다.
+   - 계정 잠금 기능을 추가하여 여러 번 로그인 실패 시 계정을 비활성화한다.
+
+   ```php
+   // 비밀번호 해싱 및 강력한 비밀번호 적용
+   $password = "Admin123!";
+   $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+
+   // 비밀번호 검증
+   if (password_verify($_POST['password'], $hashedPassword)) {
+      echo "로그인 성공";
+   } else {
+      echo "로그인 실패";
+   }
+   ```
+
+<br>
+
+2. 디버그 모드가 활성화된 상태로 운영
+
+   공격자는 애플리케이션이 디버그 모드가 활성화된 상태에서 실행되는 것을 발견하고, 오류 메세지를 통해 데이터베이스 연결 정보 또는 시스템 구조를 파악한다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 운영 환경에서는 디버그 모드를 비활성화한다.
+   - 환경 변수 파일 (`.env`)을 사용하여 디버그 모드를 제어한다.
+
+   ```php
+   // .env 파일 설정
+   DEBUG=false
+
+   // PHP에서 디버그 모드 비활성화
+   $debug = getenv('DEBUG');
+   if ($debug === 'true') {
+      ini_set('display_errors', 1);
+      error_reporting(E_ALL);
+   } else {
+      ini_set('display_errors', 0);
+      error_reporting(0);
+   }
+   ```
+
+<br>
+
+3. 불필요한 포트 및 서비스 노출
+
+   공격자는 서버에서 실행 중인 불필요한 서비스 및 포트를 스캔하고, 해당 포트를 통해 서버에 접근할 수 있는 취약점을 탐색한다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 사용하지 않는 포트 및 서비스를 비활성화한다.
+   - 방화벽을 설정하여 외부 접근을 차단한다.
+   - `iptables` 또는 `UFW`를 사용하여 접근 제어를 강화한다.
+
+   ```sh
+   # UFW 방화벽을 사용하여 22번 포트(SSH)만 허용
+   sudo ufw default deny incoming
+   sudo ufw allow 22/tcp
+   sudo ufw enable
+   ```
+
+   ```apache
+   # Apache 설정 파일에서 특정 IP만 관리자 페이지 접근 가능하도록 설정
+   <Directory /var/www/html/admin>
+      Require ip 192.168.1.100
+   </Directory>
+   ```
 
 <br>
 <br>
+
+---
 
 ### 6. Vulnerable and Outdated Components, 취약하고 오래된 구성 요소 사용
 
