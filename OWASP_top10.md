@@ -807,21 +807,186 @@
 
 **공격 방식**:
 
-- 취약한 비밀번호 정책
-- Multi-Factor Authentication (MFA) 미사용
-- Brute Force 공격 가능
+- 취약한 비밀번호 정책: 짧고 단순한 비밀번호를 사용할 수 있으며, 복잡도 요구 조건이 없을 때때 발생한다.
+
+- Multi-Factor Authentication (MFA) 미사용: 비밀번호 외 추가 인증이 없어 공격자가 쉽게 계정을 탈취할 수 있다.
+
+- Brute Force 공격 가능: 무차별 대입 공격이나 사전 대입 공격을 시도할 가능성이 있다.
+
+<br>
 
 **공격 시나리오**:
-사용자가 "password123" 같은 쉬운 비밀번호를 사용하여 계정이 탈취된다.
 
-**방어 방법**:
+1. 취약한 비밀번호 정책
 
-- 강력한 비밀번호 정책 적용
-- MFA 적용
-- 로그인 시도 횟수 제한
+   사용자가 너무 쉬운 비밀번호로 설정할 수 있도록 허용하는 경우,
+
+   ```php
+   // 비밀번호 저장 (보안 취약)
+   $password = $_POST['password'];
+   $hashedPassword = md5($password); // MD5 사용 (보안 취약)
+   $query = "INSERT INTO users (username, password) VALUES ('user', '$hashedPassword')";
+   mysqli_query($conn, $query);
+   ```
+
+   - `md5()`와 같은 취약한 해시 함수를 사용한다.
+   - 비밀번호 복잡성 검증이 없다.
+
+   <br>
+
+   **방어 방법**
+
+   - 강력한 비밀번호 정책을 적용한다.
+   - 안전한 해싱 알고리즘을 사용한다. (예: bcrypt, Argon2)
+   - 비밀번호 최소 길이 및 복잡성 요구사항을 적용한다.
+
+   ```php
+   // 비밀번호 복잡성 검사
+   function isStrongPassword($password) {
+      return preg_match('/^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/', $password);
+   }
+
+   // 비밀번호 저장 (보안 적용)
+   $password = $_POST['password'];
+
+   if (!isStrongPassword($password)) {
+      die("비밀번호는 최소 8자 이상이며, 숫자, 문자, 특수 문자를 포함해야 합니다.");
+   }
+
+   $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+   $query = "INSERT INTO users (username, password) VALUES ('user', '$hashedPassword')";
+   mysqli_query($conn, $query);
+   ```
+
+   ```php
+   // 위 정규식 설명:
+   // (?=.*[A-Za-z])  → 최소 하나 이상의 영문 포함
+   // (?=.*\d)        → 최소 하나 이상의 숫자 포함
+   // (?=.*[@$!%*?&]) → 최소 하나 이상의 특수 문자 포함
+   // {8,}           → 최소 8자 이상
+   ```
+
+<br>
+
+2. Multi-Factor Authentication (MFA) 미사용
+
+   공격자가 유출된 비밀번호를 사용하여 로그인하는 경우,
+
+   ```php
+   // 단순 로그인 확인 (보안 취약)
+   $username = $_POST['username'];
+   $password = $_POST['password'];
+
+   $query = "SELECT * FROM users WHERE username = '$username'";
+   $result = mysqli_query($conn, $query);
+   $user = mysqli_fetch_assoc($result);
+
+   if ($user && password_verify($password, $user['password'])) {
+      echo "로그인 성공!";
+   } else {
+      echo "로그인 실패!";
+   }
+   ```
+
+   - 비밀번호만으로 로그인을 허용하는 단순 인증 방식식이다.
+   - 추가적인 보안 조치(MFA, 로그인 제한 등)가 적용되지 않았다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 이메일 또는 SMS 기반 2FA를 적용한다.
+   - OTP와 같이 일회용 비밀번호를 사용한다.
+   - 인증 앱과 연동한다. (예: Google Authenticator, Authy)
+
+   ```php
+   require 'vendor/autoload.php';
+   use OTPHP\TOTP;
+
+   // MFA 코드 생성
+   $totp = TOTP::create();
+   $secret = $totp->getSecret(); // 사용자가 QR코드로 등록할 키
+   echo "QR 코드 등록: " . $totp->getProvisioningUri();
+
+   // 로그인 시 MFA 확인
+   $enteredCode = $_POST['mfa_code'];
+
+   if ($totp->verify($enteredCode)) {
+      echo "MFA 인증 성공!";
+   } else {
+      echo "MFA 인증 실패!";
+   }
+   ```
+
+<br>
+
+3. Brute Force 공격
+
+   로그인 시도 횟수를 제한하지 않으면 공격자가 무차별 대입 공격을 수행할 수 있다.
+
+   ```php
+   // 무차별 대입 공격 가능 (보안 취약)
+   $username = $_POST['username'];
+   $password = $_POST['password'];
+
+   $query = "SELECT * FROM users WHERE username = '$username'";
+   $result = mysqli_query($conn, $query);
+   $user = mysqli_fetch_assoc($result);
+
+   if ($user && password_verify($password, $user['password'])) {
+      echo "로그인 성공!";
+   } else {
+      echo "로그인 실패!";
+   }
+   ```
+
+   - 로그인 실패 횟수 제한이 없다.
+   - 자동화된 공격(Bot) 방어 기능이 없다.
+
+   <br>
+
+   **방어 방법**:
+
+   - 로그인 실패 횟수를 제한한다.
+   - reCAPTCHA 혹은 CAPTCHA를 적용한다.
+   - IP 기반 로그인 시도를 감지 및 차단한다.
+
+   ```php
+   session_start();
+   $maxAttempts = 5;
+   $lockoutTime = 300; // 5분
+
+   if (!isset($_SESSION['login_attempts'])) {
+      $_SESSION['login_attempts'] = 0;
+      $_SESSION['last_attempt_time'] = time();
+   }
+
+   // 로그인 실패 횟수 확인
+   if ($_SESSION['login_attempts'] >= $maxAttempts && (time() - $_SESSION['last_attempt_time']) < $lockoutTime) {
+      die("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.");
+   }
+
+   $username = $_POST['username'];
+   $password = $_POST['password'];
+
+   $query = "SELECT * FROM users WHERE username = '$username'";
+   $result = mysqli_query($conn, $query);
+   $user = mysqli_fetch_assoc($result);
+
+   if ($user && password_verify($password, $user['password'])) {
+      $_SESSION['login_attempts'] = 0; // 성공 시 초기화
+      echo "로그인 성공!";
+   } else {
+      $_SESSION['login_attempts']++;
+      $_SESSION['last_attempt_time'] = time();
+      echo "로그인 실패!";
+   }
+   ```
 
 <br>
 <br>
+
+---
 
 ### 8. Software and Data Integrity Failures, 소프트웨어 및 데이터 무결성 실패
 
