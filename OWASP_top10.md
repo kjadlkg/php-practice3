@@ -1166,19 +1166,156 @@
 
 **공격 방식**:
 
-- 보안 이벤트가 기록되지 않아 공격 탐지 불가능
-- 실시간 모니터링 미비로 인한 대응 지연
+- 보안 이벤트(로그인 실패, 관리자 접근 시도, 비정상적인 요청 등)가 기록되지 않으면 공격을 탐지할 수 없다.
+- 실시간 모니터링 미비로 인해 공격이 진행되는 동안 탐지 및 대응이 지연된다.
+- 로그 파일 조작되거나 삭제되면 추적이 어려워진다.
+- 알림 시스템이 없으면 보안 담당자가 이상 행동을 인지하지 못한다.
+
+<br>
 
 **공격 시나리오**:
-공격자가 1000번 이상 로그인 시도를 했지만, 로그가 남지 않아 탐지되지 않는다.
 
-**방어 방법**:
+1. 무차별 대입 공격
 
-- 로그 수집 및 분석 시스템 구축
-- 침입 탐지 시스템(IDS) 및 보안 정보 이벤트 관리(SIEM) 도입
+   공격자가 같은 IP에서 지속적으로 로그인 시도를 해도 서버에서 실패 로그를 기록하지 않아 탐지되지 않는 경우이다.
+
+   ```python
+   import requests
+
+   url = "http://example.com/login.php"
+   username = "admin"
+
+   # 1000번 로그인 시도
+   for i in range(1000):
+      data = {"username": username, "password": f"password{i}"}
+      response = requests.post(url, data=data)
+      if "Invalid password" not in response.text:
+         print(f"로그인 성공! 비밀번호: password{i}")
+         break
+   ```
+
+   위 코드는 특정 계정(`admin`)으로 1000번의 로그인 시도를 실행하는 무차별 대입 공격을 수행한다.
+
+   <br>
+
+   **방어 방법**:
+
+   ```php
+   <?php
+   session_start();
+   $host = "localhost";
+   $dbname = "security_db";
+   $username = "root";
+   $password = "";
+
+   $conn = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
+   $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+   if ($_SERVER["REQUEST_METHOD"] === "POST") {
+      $user = $_POST["username"];
+      $pass = $_POST["password"];
+
+      $stmt = $conn->prepare("SELECT * FROM users WHERE username = :user");
+      $stmt->bindParam(":user", $user);
+      $stmt->execute();
+      $userData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+      if ($userData && password_verify($pass, $userData["password"])) {
+         echo "로그인 성공!";
+      } else {
+         echo "로그인 실패!";
+
+         // 로그 기록
+         $logStmt = $conn->prepare("INSERT INTO login_attempts (username, ip_address, attempt_time) VALUES (:user, :ip, NOW())");
+         $logStmt->bindParam(":user", $user);
+         $logStmt->bindParam(":ip", $_SERVER["REMOTE_ADDR"]);
+         $logStmt->execute();
+      }
+   }
+   ?>
+   ```
+
+   - 로그인 실패 시 `login_attempts` 테이블에 로그를 남긴다.
+   - `ip_address`도 함께 저장하여 특정 IP에서 반복적인 시도가 있는지 추적한다.
+
+<br>
+
+2. 로그 조작 및 삭제
+
+   공격자가 서버에 침입하여 보안 로그를 삭제하거나 조작하여 탐지를 피하려는 경우,
+
+   ```sql
+   DELETE FROM login_attempts WHERE username='admin';
+   ```
+
+   위 SQL 명령어를 실행하면 특정 계정의 로그인 실패 기록을 모두 삭제할 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   ```php
+   <?php
+   $logFile = "/var/log/security.log";
+   $message = date("Y-m-d H:i:s") . " - [LOGIN ATTEMPT] User: $user, IP: " . $_SERVER["REMOTE_ADDR"] . "\n";
+
+   // 로그 파일에 보안 이벤트 기록
+   file_put_contents($logFile, $message, FILE_APPEND | LOCK_EX);
+
+   // 외부 서버로 로그 전송
+   $logServer = "http://logserver.example.com/collect";
+   $data = ["log" => $message];
+   $options = [
+      "http" => [
+         "header" => "Content-Type: application/x-www-form-urlencoded",
+         "method" => "POST",
+         "content" => http_build_query($data)
+      ]
+   ];
+   $context = stream_context_create($options);
+   file_get_contents($logServer, false, $context);
+   ?>
+   ```
+
+   - 로그를 로컬 파일(`/var/log/security.log`)에 저장하여 데이터베이스 삭제로부터 보호한다.
+   - 추가적으로 외부 로그 서버로 전송하여 로그 조작을 방지하고 백업을 수행한다.
+
+<br>
+
+3. 실시간 탐지 미비로 인한 대응 지연
+
+   공격자가 지속적으로 로그인 시도를 하거나 특정 취약점을 스캔할 경우,
+   서버에서 이를 탐지하지 못하면 즉각적인 조치가 불가능하다.
+
+   <br>
+
+   **방어 방법**:
+
+   ```php
+   <?php
+   $logFile = "/var/log/fail2ban.log";
+   $ip = $_SERVER["REMOTE_ADDR"];
+
+   // 로그인 시도 기록
+   $message = date("Y-m-d H:i:s") . " - Failed login from IP: $ip\n";
+   file_put_contents($logFile, $message, FILE_APPEND | LOCK_EX);
+
+   // 특정 IP에서 5번 이상 로그인 실패 시 차단
+   $failedAttempts = shell_exec("grep '$ip' $logFile | wc -l");
+
+   if ($failedAttempts >= 5) {
+      shell_exec("sudo fail2ban-client set sshd banip $ip");
+   }
+   ?>
+   ```
+
+   - 로그인 실패 로그를 `fail2ban.log`에 저장한다.
+   - 같은 IP에서 5번 이상 실패 시 `fail2ban`을 사용하여 해당 IP를 차단한다.
 
 <br>
 <br>
+
+---
 
 ### 10. Server-Side Request Forgery, SSRF
 
