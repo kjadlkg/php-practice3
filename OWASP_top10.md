@@ -1319,15 +1319,171 @@
 
 ### 10. Server-Side Request Forgery, SSRF
 
+: 공격자가 서버에게 특정 요청을 수행하도록 속여 내부 네트워크나 보호된 시스템에 접근하는 공격 기법
+
 **공격 방식**:
 
-- 서버가 공격자의 요청을 대신 수행
-- 내부 네트워크로의 접근 허용
+- 내부 네트워크 스캔: 서버가 내부 네트워크에 위치한 시스템에 요청을 보낼 수 있도록 유도한다.
+- 클라우드 메타데이터 접근: 클라우드 서비스의 메타데이터 API에 접근하여 인증 키나 환경 변수를 획득한다.
+- 내부 API 호출: 인증이 필요한 내부 관리 페이지나 API를 호출하여 정보를 탈취한다.
+
+<br>
 
 **공격 시나리오**:
-공격자가 `/fetch?url=http://internal/admin`을 요청하여 내부 관리자 페이지에 접근한다.
 
-**방어 방법**:
+1. 내부 관리자 페이지 접근
 
-- 외부 요청을 제한
-- 화이트리스트 기반 접근 제어를 적용
+   서버가 사용자의 요청을 받아 특정 URL의 내용을 가져오는 기능이 있을 때, 공격자는 내부 관리자 페이지(`/admin`)에 접근할 수 있다.
+
+   ```php
+   <?php
+   // 취약한 코드 예제
+   if (isset($_GET['url'])) {
+      $url = $_GET['url'];
+      $response = file_get_contents($url);
+      echo $response;
+   }
+   ?>
+   ```
+
+   공격자가 내부 관리자 페이지를 다음과 같은 코드를 이용해 조회한다.
+
+   ```sh
+   curl "http://example.com/fetch.php?url=http://localhost/admin"
+   ```
+
+   이 요청을 통해 공격자는 내부 관리자 페이지(`/admin`)에 접근하여 민감한 정보를 가져올 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   화이트리스트 방식 적용하여 내부 관리자 페이지가 있는 서버를 보호하기 위해 특정 도메인만 허용한다.
+
+   ```php
+   <?php
+   // 화이트리스트에 등록된 도메인만 요청 허용
+   $allowed_domains = ['https://api.example.com', 'https://trusted-site.com'];
+
+   if (isset($_GET['url'])) {
+      $url = $_GET['url'];
+
+      // 도메인 검증
+      $parsed_url = parse_url($url);
+      $host = $parsed_url['scheme'] . '://' . $parsed_url['host'];
+
+      if (!in_array($host, $allowed_domains)) {
+         die('허용되지 않은 도메인입니다.');
+      }
+
+      $response = file_get_contents($url);
+      echo htmlspecialchars($response, ENT_QUOTES, 'UTF-8'); // XSS 방어 추가
+   }
+   ?>
+   ```
+
+   내부 관리자 페이지와 같은 비공개 리소스에 대한 접근을 원천 차단한다.
+
+<br>
+
+2. 클라우드 메타데이터 서비스 접근
+
+   일부 클라우드 환경(AWS, GCP)에서는 인스턴스 메타데이터를 제공하는 API가 존재하며, 이를 통해 중요 정보(예: AWS IAM 역할의 보안 키)를 가져올 수 있다.
+
+   ```sh
+   curl "http://example.com/fetch.php?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+   ```
+
+   만약 서버가 위 요청을 실행하면, 공격자는 AWS IAM의 보안 자격 증명을 얻을 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   클라우드 메타데이터 서비스는 일반적으로 내부 IP(`169.254.169.254`)에서 접근이 가능하기에 이 IP 대역으로의 요청을 차단해야한다.
+
+   ```php
+   <?php
+   function is_blocked_ip($url) {
+      $parsed_url = parse_url($url);
+      $ip = gethostbyname($parsed_url['host']);
+
+      // 내부 IP 차단 (AWS 메타데이터 주소 포함)
+      $blocked_ips = ['169.254.169.254', '127.0.0.1'];
+
+      if (in_array($ip, $blocked_ips)) {
+         return true;
+      }
+      return false;
+   }
+
+   if (isset($_GET['url'])) {
+      $url = $_GET['url'];
+
+      if (is_blocked_ip($url)) {
+         die('내부 네트워크 접근이 차단되었습니다.');
+      }
+
+      $response = file_get_contents($url);
+      echo htmlspecialchars($response, ENT_QUOTES, 'UTF-8'); // XSS 방어 추가
+   }
+   ?>
+   ```
+
+   클라우드 메타데이터 API 접근을 원천적으로 차단하여 보안 자격 증명 유출을 방지한다.
+
+<br>
+
+3. 내부 서비스 포트 스캔
+
+   공격자는 내부 네트워크의 특정 포트(예: 6379 - Redis, 3306 - MySQL)를 확인하여 내부 서비스가 실행중인지 확인할 수 있다.
+
+   ```sh
+   curl "http://example.com/fetch.php?url=http://127.0.0.1:6379"
+   ```
+
+   만약 응답이 정상적으로 반환된다면, 내부 서비스가 열려 있음을 알 수 있다.
+
+   <br>
+
+   **방어 방법**:
+
+   일반적으로 내부 서비스는 `127.0.0.1` 또는 `localhost`에서 실행되므로, 이 주소로의 요청을 차단한다.
+
+   ```php
+   <?php
+   function is_internal_ip($url) {
+      $parsed_url = parse_url($url);
+      $ip = gethostbyname($parsed_url['host']);
+
+      // 내부 IP 대역 차단
+      if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+         return true;
+      }
+      return false;
+   }
+
+   function is_blocked_port($url) {
+      $parsed_url = parse_url($url);
+      $blocked_ports = [22, 3306, 6379, 9200]; // SSH, MySQL, Redis, Elasticsearch 포트 차단
+
+      if (isset($parsed_url['port']) && in_array($parsed_url['port'], $blocked_ports)) {
+         return true;
+      }
+      return false;
+   }
+
+   if (isset($_GET['url'])) {
+      $url = $_GET['url'];
+
+      if (is_internal_ip($url) || is_blocked_port($url)) {
+         die('내부 네트워크 또는 차단된 포트 접근이 차단되었습니다.');
+      }
+
+      $response = file_get_contents($url);
+      echo htmlspecialchars($response, ENT_QUOTES, 'UTF-8'); // XSS 방어 추가
+   }
+   ?>
+   ```
+
+   내부 네트워크의 특정 포트로의 접근을 차단하여 포트 스캔을 방지한다.
